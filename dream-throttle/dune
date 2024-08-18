@@ -1,0 +1,4 @@
+(library
+ (name dream_throttle)
+ (public_name nightmare.dream-throttle)
+ (libraries dream))

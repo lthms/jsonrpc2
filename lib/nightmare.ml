@@ -98,6 +98,18 @@ let response_encoding result_encoding error_data_encoding =
              (req "id" (id_encoding ())));
       ])
 
+let too_many_concurrent_request id =
+  Failure
+    {
+      error =
+        {
+          error_code = Server_error (-32099);
+          error_message = "Too many concurrent request";
+          error_data = None;
+        };
+      id;
+    }
+
 let method_not_found_error id method_name =
   Failure
     {
@@ -296,11 +308,16 @@ module Server = struct
     | exception _ -> Lwt.return (Some (invalid_params request.request_id))
     | v -> k { request with request_params = v }
 
-  let handler_request_object methods state request =
+  let handler_request_object (request : Dream.request) methods state
+      untyped_request =
     let open Lwt.Syntax in
-    with_request_id request @@ fun request ->
-    with_request_method methods request @@ fun (Method m) ->
-    with_typed_request m request @@ fun typed_request ->
+    with_request_id untyped_request @@ fun untyped_request ->
+    Dream_throttle.throttle
+      ~rejection:(Some (too_many_concurrent_request untyped_request.request_id))
+      request
+    @@ fun () ->
+    with_request_method methods untyped_request @@ fun (Method m) ->
+    with_typed_request m untyped_request @@ fun typed_request ->
     let* typed_response = m.method_handler state typed_request.request_params in
     let response = untyped_response typed_request.request_id m typed_response in
     Lwt.return (Some response)
@@ -320,14 +337,17 @@ module Server = struct
       Ezjsonm_encoding.(
         from_value (batch_encoding (request_encoding json)) value)
     with
-    | Some (Singleton request) -> (
-        let* response = handler_request_object methods state request in
-        match response with
-        | Some response -> Lwt.return (from_json_rpc_response response)
+    | Some (Singleton untyped_request) -> (
+        let* untyped_response =
+          handler_request_object request methods state untyped_request
+        in
+        match untyped_response with
+        | Some untyped_response ->
+            Lwt.return (from_json_rpc_response untyped_response)
         | None -> Lwt.return (Dream.response ~code:200 ""))
     | Some (Batch l) ->
         let* l =
-          Lwt_list.filter_map_s (handler_request_object methods state) l
+          Lwt_list.filter_map_s (handler_request_object request methods state) l
         in
         if l = [] then Lwt.return (Dream.response ~code:200 "")
         else Lwt.return (from_json_rpc_batch l)
