@@ -232,6 +232,32 @@ let batch_encoding data_encoding =
       ])
 
 module Server = struct
+  type ('a, 'r) m = ('a -> 'r Lwt.t) -> 'r Lwt.t
+
+  let ( let*! ) (type a b r) (x : a Lwt.t) (f : a -> (b, r) m) : (b, r) m =
+   fun k -> Lwt.bind x (fun x -> f x k)
+
+  let ( let* ) (type a b r) (k : (a, r) m) (f : a -> (b, r) m) : (b, r) m =
+   fun k' -> k (fun x -> f x k')
+
+  let return (type a r) (x : a) : (a, r) m = fun k -> k x
+  let return_some x = return (Some x)
+  let cut (type a r) (x : r) : (a, r) m = fun _k -> Lwt.return x
+  let cut_some x = cut (Some x)
+  let run (k : ('a, 'r) m) = k Lwt.return
+
+  let cut_on_exn (type a r) ~on_exn:(f : exn -> r) (m : unit -> a Lwt.t) :
+      (a, r) m =
+    let*! r =
+      Lwt.catch
+        (fun () ->
+          let open Lwt.Syntax in
+          let* x = m () in
+          Lwt.return (Ok x))
+        (fun exn -> Lwt.return (Error exn))
+    in
+    match r with Ok r -> return r | Error exn -> cut (f exn)
+
   type 'state methods = 'state t Methods.t
 
   let no_methods = Methods.empty
@@ -252,7 +278,7 @@ module Server = struct
     in
     Methods.add method_.method_name (Method method_) table
 
-  let untyped_response id m = function
+  let untype_response id m = function
     | Ok typed_result -> (
         match
           Ezjsonm_encoding.to_value_exn m.method_output_encoding typed_result
@@ -269,7 +295,7 @@ module Server = struct
         | error ->
             Failure { error = { typed_error with error_data = error }; id })
 
-  let with_request_id request k =
+  let request_id request k =
     let open Lwt.Syntax in
     match request.request_id with
     | `Notification ->
@@ -291,48 +317,55 @@ module Server = struct
     @@ Ezjsonm_encoding.(
          to_string_exn ~minify:true (list (response_encoding json json)) l)
 
-  let with_request_method methods request k =
-    match Methods.find_opt request.request_method methods with
-    | Some m -> k m
-    | None ->
-        Lwt.return
-          (Some
-             (method_not_found_error request.request_id request.request_method))
+  let request_method methods request =
+    match Methods.find request.request_method methods with
+    | m -> return m
+    | exception Not_found ->
+        cut_some
+          (method_not_found_error request.request_id request.request_method)
 
-  let with_typed_request m request k =
+  let type_request m request =
     match
       Option.map
         Ezjsonm_encoding.(from_value_exn m.method_input_encoding)
         request.request_params
     with
-    | exception _ -> Lwt.return (Some (invalid_params request.request_id))
-    | v -> k { request with request_params = v }
+    | exception _ -> cut_some (invalid_params request.request_id)
+    | v -> return { request with request_params = v }
+
+  let run_handler m state typed_request =
+    cut_on_exn
+      ~on_exn:(fun _exn ->
+        Some
+          (internal_error typed_request.request_id
+             "Unexpected error while processing request"))
+      (fun () -> m.method_handler state typed_request.request_params)
 
   let handler_request_object (request : Dream.request) methods state
       untyped_request =
-    let open Lwt.Syntax in
-    with_request_id untyped_request @@ fun untyped_request ->
-    Dream_throttle.throttle
-      ~rejection:(Some (too_many_concurrent_request untyped_request.request_id))
-      request
-    @@ fun () ->
-    with_request_method methods untyped_request @@ fun (Method m) ->
-    with_typed_request m untyped_request @@ fun typed_request ->
-    let* typed_response = m.method_handler state typed_request.request_params in
-    let response = untyped_response typed_request.request_id m typed_response in
-    Lwt.return (Some response)
+    run
+    @@
+    let* untyped_request = request_id untyped_request in
+    let* () =
+      Dream_throttle.throttle
+        ~rejection:
+          (Some (too_many_concurrent_request untyped_request.request_id))
+        request
+    in
+    let* (Method m) = request_method methods untyped_request in
+    let* typed_request = type_request m untyped_request in
+    let* typed_response = run_handler m state typed_request in
+    let response = untype_response typed_request.request_id m typed_response in
+    return_some response
 
-  let with_body body k =
-    let value = try Some (Ezjsonm.from_string body) with _ -> None in
-    match value with
-    | Some value -> k value
-    | None -> Lwt.return (from_json_rpc_response parse_error)
+  let parse_body body =
+    cut_on_exn ~on_exn:(fun _exn -> from_json_rpc_response parse_error)
+    @@ fun () -> Lwt.return (Ezjsonm.from_string body)
 
   let handler methods state request =
     let open Lwt.Syntax in
     let* body = Dream.body request in
-
-    with_body body @@ fun value ->
+    parse_body body @@ fun value ->
     match
       Ezjsonm_encoding.(
         from_value (batch_encoding (request_encoding json)) value)
