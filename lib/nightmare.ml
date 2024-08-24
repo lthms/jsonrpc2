@@ -98,18 +98,6 @@ let response_encoding result_encoding error_data_encoding =
              (req "id" (id_encoding ())));
       ])
 
-let too_many_concurrent_request id =
-  Failure
-    {
-      error =
-        {
-          error_code = Server_error (-32099);
-          error_message = "Too many concurrent request";
-          error_data = None;
-        };
-      id;
-    }
-
 let method_not_found_error id method_name =
   Failure
     {
@@ -341,17 +329,10 @@ module Server = struct
              "Unexpected error while processing request"))
       (fun () -> m.method_handler state typed_request.request_params)
 
-  let handler_request_object (request : Dream.request) methods state
-      untyped_request =
+  let handler_request_object methods state untyped_request =
     run
     @@
     let* untyped_request = request_id untyped_request in
-    let* () =
-      Dream_throttle.throttle
-        ~rejection:
-          (Some (too_many_concurrent_request untyped_request.request_id))
-        request
-    in
     let* (Method m) = request_method methods untyped_request in
     let* typed_request = type_request m untyped_request in
     let* typed_response = run_handler m state typed_request in
@@ -372,7 +353,7 @@ module Server = struct
     with
     | Some (Singleton untyped_request) -> (
         let* untyped_response =
-          handler_request_object request methods state untyped_request
+          handler_request_object methods state untyped_request
         in
         match untyped_response with
         | Some untyped_response ->
@@ -380,7 +361,7 @@ module Server = struct
         | None -> Lwt.return (Dream.response ~code:200 ""))
     | Some (Batch l) ->
         let* l =
-          Lwt_list.filter_map_s (handler_request_object request methods state) l
+          Lwt_list.filter_map_s (handler_request_object methods state) l
         in
         if l = [] then Lwt.return (Dream.response ~code:200 "")
         else Lwt.return (from_json_rpc_batch l)
