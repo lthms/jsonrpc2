@@ -1,0 +1,4 @@
+(library
+ (name jsonrpc2_api)
+ (public_name jsonrpc2-api)
+ (libraries ezjsonm-encoding))

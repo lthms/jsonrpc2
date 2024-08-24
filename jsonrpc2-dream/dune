@@ -1,0 +1,4 @@
+(library
+ (name jsonrpc2_dream)
+ (public_name jsonrpc2-dream)
+ (libraries jsonrpc2-api dream ezjsonm-encoding))
