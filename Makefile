@@ -1,7 +1,7 @@
 include helpers.mk
 
 PROJECT := jsonrpc2
-SUBPROJECTS := api dream client
+SUBPROJECTS := api server-lwt dream client
 PACKAGES := $(addprefix ${PROJECT}-,${SUBPROJECTS}) 
 OPAM_FILES := $(addsuffix .opam,${PACKAGES})
 DUNE_PACKAGES_LIST := $(subst $(space),$(comma),$(foreach pkg,${PACKAGES},$(strip ${pkg})))

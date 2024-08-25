@@ -16,9 +16,14 @@
  (depends (ocaml (>= "4.08")) (ezjsonm-encoding (>= "2.1"))))
 
 (package
+ (name jsonrpc2-server-lwt)
+ (synopsis "General-purpose JSON-RPC 2.0 server")
+ (depends (ocaml (>= "4.08")) lwt (ezjsonm-encoding (>= "2.1")) jsonrpc2-api))
+
+(package
  (name jsonrpc2-dream)
  (synopsis "Implement your JSON-RPC 2.0 on top of dream")
- (depends (ocaml (>= "4.08")) (dream (= "1.0.0~alpha6")) (ezjsonm-encoding (>= "2.1")) jsonrpc2-api))
+ (depends (ocaml (>= "4.08")) (dream (= "1.0.0~alpha6")) (ezjsonm-encoding (>= "2.1")) jsonrpc2-api jsonrpc2-server-lwt))
 
 (package
  (name jsonrpc2-client)

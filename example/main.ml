@@ -8,12 +8,15 @@ module Api = struct
 end
 
 module Handler = struct
-  let echo () = Jsonrpc2_dream.force_params @@ fun msg -> Lwt.return (Ok msg)
+  let echo =
+    Jsonrpc2_server_lwt.force_params @@ fun () msg -> Lwt.return (Ok msg)
 end
 
 let () =
   let open Lwt.Syntax in
-  let methods = Jsonrpc2_dream.(no_methods |> register Api.echo Handler.echo) in
+  let methods =
+    Jsonrpc2_server_lwt.(no_methods |> register Api.echo Handler.echo)
+  in
   Lwt_main.run
   @@
   let* () =
