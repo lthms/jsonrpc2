@@ -1,0 +1,4 @@
+(library
+ (name jsonrpc2_http_client_lwt)
+ (public_name jsonrpc2-http-client-lwt)
+ (libraries jsonrpc2-api http-lwt-client ezjsonm-encoding))

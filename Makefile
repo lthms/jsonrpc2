@@ -1,7 +1,7 @@
 include helpers.mk
 
 PROJECT := jsonrpc2
-SUBPROJECTS := api server-lwt dream client
+SUBPROJECTS := api server-lwt dream http-client-lwt
 PACKAGES := $(addprefix ${PROJECT}-,${SUBPROJECTS}) 
 OPAM_FILES := $(addsuffix .opam,${PACKAGES})
 DUNE_PACKAGES_LIST := $(subst $(space),$(comma),$(foreach pkg,${PACKAGES},$(strip ${pkg})))
@@ -13,7 +13,7 @@ BUILD_PROFILE ?= release
 all: build
 
 .PHONY: build
-build:
+build: ${OPAM_FILES}
 	dune build --profile=${BUILD_PROFILE} -p ${DUNE_PACKAGES_LIST}
 
 _opam/.created:

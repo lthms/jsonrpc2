@@ -25,8 +25,8 @@ let () =
   and* _ =
     let* () = Lwt_unix.sleep 2. in
     let* result =
-      Jsonrpc2_client.rpc ~params:"Hello, world!" "http://localhost:8080/"
-        Api.echo
+      Jsonrpc2_http_client_lwt.rpc ~params:"Hello, world!"
+        "http://localhost:8080/" Api.echo
     in
     match result with
     | Ok result ->

@@ -26,7 +26,7 @@
  (depends (ocaml (>= "4.08")) (dream (= "1.0.0~alpha6")) (ezjsonm-encoding (>= "2.1")) jsonrpc2-api jsonrpc2-server-lwt))
 
 (package
- (name jsonrpc2-client)
+ (name jsonrpc2-http-client-lwt)
  (synopsis "Query your JSON-RPC 2.0 API")
  (depends (ocaml (>= "4.08")) http-lwt-client (ezjsonm-encoding (>= "2.1")) jsonrpc2-api))
 

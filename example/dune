@@ -1,3 +1,3 @@
 (executable
  (name main)
- (libraries jsonrpc2-api jsonrpc2-dream jsonrpc2-client))
+ (libraries jsonrpc2-api jsonrpc2-dream jsonrpc2-http-client-lwt))
