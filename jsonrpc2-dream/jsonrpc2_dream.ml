@@ -15,32 +15,6 @@ type 'state t = Method : ('state, 'input, 'output, 'error) method_ -> 'state t
 
 module Methods = Map.Make (String)
 
-type ('a, 'r) m = ('a -> 'r Lwt.t) -> 'r Lwt.t
-
-let ( let*! ) (type a b r) (x : a Lwt.t) (f : a -> (b, r) m) : (b, r) m =
- fun k -> Lwt.bind x (fun x -> f x k)
-
-let ( let* ) (type a b r) (k : (a, r) m) (f : a -> (b, r) m) : (b, r) m =
- fun k' -> k (fun x -> f x k')
-
-let return (type a r) (x : a) : (a, r) m = fun k -> k x
-let return_some x = return (Some x)
-let cut (type a r) (x : r) : (a, r) m = fun _k -> Lwt.return x
-let cut_some x = cut (Some x)
-let run (k : ('a, 'r) m) = k Lwt.return
-
-let cut_on_exn (type a r) ~on_exn:(f : exn -> r) (m : unit -> a Lwt.t) :
-    (a, r) m =
-  let*! r =
-    Lwt.catch
-      (fun () ->
-        let open Lwt.Syntax in
-        let* x = m () in
-        Lwt.return (Ok x))
-      (fun exn -> Lwt.return (Error exn))
-  in
-  match r with Ok r -> return r | Error exn -> cut (f exn)
-
 type 'state methods = 'state t Methods.t
 
 let no_methods = Methods.empty
@@ -74,6 +48,18 @@ let untype_response id m = function
       | error -> Failure { error = { typed_error with error_data = error }; id }
       )
 
+let cut_on_exn (type a r) ~on_exn:(f : exn -> r) (m : unit -> a Lwt.t) k =
+  let open Lwt.Syntax in
+  let* r =
+    Lwt.catch
+      (fun () ->
+        let open Lwt.Syntax in
+        let* x = m () in
+        Lwt.return (Ok x))
+      (fun exn -> Lwt.return (Error exn))
+  in
+  match r with Ok r -> k r | Error exn -> Lwt.return (f exn)
+
 let request_id request k =
   let open Lwt.Syntax in
   match request.request_id with
@@ -84,7 +70,9 @@ let request_id request k =
           Lwt.return ())
         ignore;
       Lwt.return None
-  | #id as i -> k { request with request_id = i }
+  | #id as i ->
+      let* res = k { request with request_id = i } in
+      Lwt.return_some res
 
 let from_json_rpc_response response =
   Dream.response ~code:200
@@ -96,39 +84,35 @@ let from_json_rpc_batch l =
   @@ Ezjsonm_encoding.(
        to_string_exn ~minify:true (list (response_encoding json json)) l)
 
-let request_method methods request =
+let request_method methods request k =
   match Methods.find request.request_method methods with
-  | m -> return m
+  | m -> k m
   | exception Not_found ->
-      cut_some
+      Lwt.return
         (method_not_found_error request.request_id request.request_method)
 
-let type_request m request =
+let type_request m request k =
   match
     Option.map
       Ezjsonm_encoding.(from_value_exn m.method_input_encoding)
       request.request_params
   with
-  | exception _ -> cut_some (invalid_params request.request_id)
-  | v -> return { request with request_params = v }
+  | exception _ -> Lwt.return (invalid_params request.request_id)
+  | v -> k { request with request_params = v }
 
 let run_handler m state typed_request =
   cut_on_exn
     ~on_exn:(fun _exn ->
-      Some
-        (internal_error typed_request.request_id
-           "Unexpected error while processing request"))
+      internal_error typed_request.request_id
+        "Unexpected error while processing request")
     (fun () -> m.method_handler state typed_request.request_params)
 
 let handler_request_object methods state untyped_request =
-  run
-  @@
-  let* untyped_request = request_id untyped_request in
-  let* (Method m) = request_method methods untyped_request in
-  let* typed_request = type_request m untyped_request in
-  let* typed_response = run_handler m state typed_request in
-  let response = untype_response typed_request.request_id m typed_response in
-  return_some response
+  request_id untyped_request @@ fun untyped_request ->
+  request_method methods untyped_request @@ fun (Method m) ->
+  type_request m untyped_request @@ fun typed_request ->
+  run_handler m state typed_request @@ fun typed_response ->
+  Lwt.return (untype_response typed_request.request_id m typed_response)
 
 let parse_body body =
   cut_on_exn ~on_exn:(fun _exn -> from_json_rpc_response parse_error)
