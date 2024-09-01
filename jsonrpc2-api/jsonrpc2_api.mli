@@ -32,15 +32,11 @@ val internal_error : id -> string -> ('a, Ezjsonm.value) response_object
 
 type 'a batch = Singleton of 'a | Batch of 'a list
 
-val id_encoding :
-  unit -> [> `Null | `Number of int | `String of string ] Ezjsonm_encoding.t
+val id_encoding : unit -> [> id ] Ezjsonm_encoding.t
 
 val request_encoding :
   'a Ezjsonm_encoding.t ->
-  ( 'a,
-    [> `Notification | `Null | `Number of int | `String of string ] )
-  request_object
-  Ezjsonm_encoding.t
+  ('a, [> `Notification | id ]) request_object Ezjsonm_encoding.t
 
 val error_code_encoding : error_code Ezjsonm_encoding.t
 val error_encoding : 'a Ezjsonm_encoding.t -> 'a error Ezjsonm_encoding.t
